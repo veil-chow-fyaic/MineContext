@@ -1,4 +1,4 @@
-import { ScreenSettings } from './../../../renderer/src/store/setting';
+import { defaultScreenSettings, ScreenSettings } from './../../../renderer/src/store/setting';
 import { CaptureSource } from '@interface/common/source'
 import { IpcServerPushChannel } from '@shared/ipc-server-push-channel'
 import { BrowserWindow, ipcMain } from 'electron'
@@ -49,26 +49,18 @@ class ScreenMonitorTask extends ScheduleNextTask {
   }
   private listenToScreenMonitorEvents() {
     ipcMain.handle(IpcChannel.Task_Update_Current_Record_App, (_, appInfo: CaptureSource[]) => {
-      logger.info(
-        'ScreenMonitorTask updateCurrentRecordApp -->',
-        appInfo.map((v) => pick(v, ['name', 'type']))
-      )
-      this.appInfo = uniqBy([...this.appInfo, ...appInfo], 'id')
-      this.configCache?.triggerUpdate(true)
+      this.updateCurrentRecordApp(appInfo)
     })
     ipcMain.handle(IpcChannel.Task_Update_Model_Config, (_, config: ScreenSettings) => {
-      this.modelConfig = config
-      this.updateInterval(config.recordInterval * 1000)
+      this.updateModelConfig(config)
     })
     ipcMain.handle(IpcChannel.Task_Start, () => {
       logger.info('render notify ScreenMonitorTask start')
-      ScreenMonitorTask.globalStatus = 'running'
-      this.startTask()
+      this.startRecording()
     })
     ipcMain.handle(IpcChannel.Task_Stop, () => {
       logger.info('render notify ScreenMonitorTask stop')
-      ScreenMonitorTask.globalStatus = 'stopped'
-      this.stopTask()
+      this.stopRecording()
     })
     ipcMain.handle(IpcChannel.Task_Check_Can_Record, () => {
       return {
@@ -97,6 +89,62 @@ class ScreenMonitorTask extends ScheduleNextTask {
       }
     })
   }
+  public updateCurrentRecordApp(appInfo: CaptureSource[]) {
+    const normalizedAppInfo = appInfo.map((source) => this.normalizeCaptureSource(source))
+    logger.info(
+      'ScreenMonitorTask updateCurrentRecordApp -->',
+      normalizedAppInfo.map((v) => pick(v, ['name', 'type']))
+    )
+    this.appInfo = uniqBy([...this.appInfo, ...normalizedAppInfo], 'id')
+    this.configCache?.triggerUpdate(true)
+  }
+
+  public updateModelConfig(config: Partial<ScreenSettings>) {
+    this.modelConfig = { ...this.modelConfig, ...config }
+    const recordInterval = this.modelConfig.recordInterval || defaultScreenSettings.recordInterval
+    this.updateInterval(recordInterval * 1000)
+  }
+
+  public async startRecordingWithDefaults(config: Partial<ScreenSettings> = {}) {
+    this.updateModelConfig({ ...defaultScreenSettings, ...config })
+
+    const visibleSources = await this.getVisibleSourcesUseCache()
+    const visible = visibleSources.filter((source) => source.isVisible)
+    const screens = visible.filter((source) => source.type === 'screen')
+    const selectedSources = screens.length > 0 ? [screens[0]] : visible.slice(0, 1)
+
+    if (selectedSources.length === 0) {
+      throw new Error('No visible screen or window source is available for recording')
+    }
+
+    this.updateCurrentRecordApp(selectedSources)
+    this.startRecording()
+
+    return {
+      selectedSources: selectedSources.map((source) => pick(source, ['id', 'name', 'type'])),
+      status: this.getRecordingStatus()
+    }
+  }
+
+  public startRecording() {
+    ScreenMonitorTask.globalStatus = 'running'
+    this.startTask()
+  }
+
+  public stopRecording() {
+    ScreenMonitorTask.globalStatus = 'stopped'
+    this.stopTask()
+  }
+
+  public getRecordingStatus() {
+    return {
+      canRecord: this.checkCanRecord(),
+      status: this.status,
+      globalStatus: ScreenMonitorTask.globalStatus,
+      selectedSources: this.appInfo.map((source) => pick(source, ['id', 'name', 'type']))
+    }
+  }
+
   private async startTask() {
     if (this.status === 'running') {
       return
@@ -126,7 +174,7 @@ class ScreenMonitorTask extends ScheduleNextTask {
       const res = await screenshotService.getVisibleSources()
       logger.info('getVisibleSourcesUseCache', res)
       if (res.sources) {
-        return res.sources
+        return res.sources.map((source) => this.normalizeCaptureSource(source))
       } else {
         return []
       }
@@ -186,6 +234,17 @@ class ScreenMonitorTask extends ScheduleNextTask {
     BrowserWindow.getAllWindows().forEach((window) => {
       window.webContents.send(IpcServerPushChannel.PushScreenMonitorStatus, this.status)
     })
+  }
+
+  private normalizeCaptureSource(source: CaptureSource): CaptureSource {
+    if (source.type) {
+      return source
+    }
+
+    return {
+      ...source,
+      type: source.id.startsWith('screen:') ? 'screen' : 'window'
+    }
   }
 
   public unregister() {

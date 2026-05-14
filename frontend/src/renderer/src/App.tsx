@@ -34,10 +34,25 @@ function AppContent(): React.ReactElement {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('starting')
   const [showSetting, setShowSettings] = useState<boolean>(true)
 
+  const refreshInitSettings = useMemoizedFn(async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:1733/api/health')
+      const result = await response.json()
+      const hasLlm = Boolean(result?.data?.components?.llm)
+      logger.info('Init settings health check:', result)
+      setShowSettings(!hasLlm)
+    } catch (error) {
+      logger.error('Failed to refresh init settings:', { error })
+    }
+  })
+
   const checkInitialStatus = useMemoizedFn(async () => {
     try {
       const statusInfo: BackendStatusInfo = await window.electron.ipcRenderer.invoke('backend:get-status')
       setBackendStatus(statusInfo.status)
+      if (statusInfo.status === 'running') {
+        refreshInitSettings()
+      }
     } catch (error) {
       logger.error('Failed to get initial backend status:', { error })
       setBackendStatus('error')
@@ -98,6 +113,7 @@ function AppContent(): React.ReactElement {
       logger.info('Init settings data:', temp)
       setShowSettings(!temp.data.components.llm)
     })
+    refreshInitSettings()
   }, [])
 
   // Decide whether to display the application based on the status

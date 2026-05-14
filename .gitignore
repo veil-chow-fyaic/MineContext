@@ -12,7 +12,15 @@ __pycache__
 /config/runtime
 /test_script
 /config/user*
+.env
+.env.*
+.tmp/
 .DS_Store
+
+agent-harness/build/
+agent-harness/*.egg-info/
+agent-harness/.pytest_cache/
+agent-harness/**/__pycache__/
 
 .venv/
 uv.lock

@@ -27,13 +27,13 @@ vlm_model:
   base_url: "${LLM_BASE_URL}"
   api_key: "${LLM_API_KEY}"
   model: "${LLM_MODEL}"
-  provider: ""
+  provider: "${LLM_PROVIDER:}"
 
 embedding_model:
   base_url: "${EMBEDDING_BASE_URL}"
   api_key: "${EMBEDDING_API_KEY}"
   model: "${EMBEDDING_MODEL}"
-  provider: ""
+  provider: "${EMBEDDING_PROVIDER:}"
   output_dim: 2048
 
 # Context capture module

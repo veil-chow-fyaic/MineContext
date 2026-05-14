@@ -34,6 +34,8 @@
     "publish": "npm run copy-backend && npm run build && electron-builder --mac --win -p always",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "copy-backend": "node scripts/copy-prebuilt-backend.js",
+    "cli:install": "python3 -m pip install -e ../agent-harness",
+    "cli:test": "python3 -m pytest ../agent-harness/cli_anything/minecontext/tests",
     "electron-pack": "npm run build && electron-builder --mac"
   },
   "dependencies": {

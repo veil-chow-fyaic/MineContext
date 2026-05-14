@@ -232,43 +232,282 @@ frontend/
 
 ## 💻 前端使用
 
-### 构建后端
+### 本地开发依赖
 
-在开始前端开发之前，需要先构建后端：
+本地开发需要同时准备 Python 后端和 Electron 前端环境：
+
+- macOS 或 Windows。当前 macOS 开发、打包路径最完整。
+- Git。
+- Python 3.10 及以上，推荐使用 `uv` 自动管理虚拟环境。
+- Node.js 20 及以上。
+- `pnpm` 10 及以上。
+- 可选：`tmux`，用于把后端和前端开发服务放到后台会话中运行。
+
+安装 `uv` 和 `pnpm`：
 
 ```bash
-uv sync
-source .venv/bin/activate
-./build.sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+corepack enable
+corepack prepare pnpm@latest --activate
 ```
 
 ### 安装依赖
 
-由于包版本原因，目前不支持使用国内 PYPI 源，请输入以下命令，确保使用的是原始 PYPI 环境
+由于部分包版本和平台二进制依赖原因，建议使用官方 PyPI 源：
 
 ```bash
 pip config unset global.index-url
+
+# 克隆仓库
+git clone https://github.com/volcengine/MineContext.git
+cd MineContext
+
+# 安装后端依赖，自动创建 .venv
+uv sync
+
+# 如果本机使用 SOCKS 代理，并遇到 httpx 缺少 socksio 的错误，额外安装：
+uv pip install socksio
+
+# 安装前端依赖
 cd frontend
 pnpm install
 ```
 
-### 开发调试
+如果 `pnpm install` 在 `node-gyp` 阶段报 `No module named 'distutils'`，说明当前 Python 版本缺少 `distutils`。macOS 可指定系统 Python 后重试：
+
+```bash
+cd frontend
+PYTHON="/usr/bin/python3" npm_config_python="/usr/bin/python3" pnpm install
+```
+
+### 配置模型环境变量
+
+推荐把密钥写入项目根目录的 `.env` 文件，并确保该文件不会提交到 Git。示例：
+
+```bash
+cd MineContext
+cat > .env <<'EOF'
+LLM_PROVIDER=doubao
+LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+LLM_MODEL=doubao-seed-2-0-mini-260428
+LLM_API_KEY=your-ark-api-key
+
+EMBEDDING_PROVIDER=doubao
+EMBEDDING_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+EMBEDDING_MODEL=doubao-embedding-vision-251215
+EMBEDDING_API_KEY=your-ark-api-key
+EOF
+chmod 600 .env
+```
+
+使用豆包时，需要在火山引擎 Ark 控制台开通对应模型，并确认 API Key 属于同一个账号和地域：
+
+- VLM：`doubao-seed-2-0-mini-260428`
+- Embedding：`doubao-embedding-vision-251215`
+- Base URL：`https://ark.cn-beijing.volces.com/api/v3`
+
+也可以使用 OpenAI 或其他兼容 OpenAI API 的服务，按实际服务修改 `LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_MODEL` 和 Embedding 配置。
+
+### 开发启动
 
 本地开发时，截屏范围获取较慢属于正常现象，等待即可，打包应用无此问题。
 
+启动后端：
+
 ```bash
+cd MineContext
+set -a
+source .env
+set +a
+uv run opencontext start --port 1733
+```
+
+启动前端：
+
+```bash
+cd MineContext/frontend
 pnpm dev
 ```
+
+如果希望服务在后台保持运行，可以使用 `tmux`：
+
+```bash
+tmux new-session -d -s minecontext-backend -c "$(pwd)" \
+  'set -a; source .env; set +a; uv run opencontext start --port 1733'
+
+tmux new-session -d -s minecontext-frontend -c "$(pwd)/frontend" \
+  'PYTHON="/usr/bin/python3" npm_config_python="/usr/bin/python3" pnpm dev'
+```
+
+查看或停止后台会话：
+
+```bash
+tmux attach -t minecontext-backend
+tmux attach -t minecontext-frontend
+tmux kill-session -t minecontext-backend
+tmux kill-session -t minecontext-frontend
+```
+
+### 验证启动状态
+
+后端健康检查：
+
+```bash
+curl http://127.0.0.1:1733/health
+```
+
+前端开发服务：
+
+```bash
+curl -I http://localhost:5173/
+```
+
+Electron 主进程还提供了一个仅监听本机的录制控制接口，便于自动化启动：
+
+```bash
+curl http://127.0.0.1:1734/health
+curl http://127.0.0.1:1734/recording/status
+```
+
+启动录制：
+
+```bash
+curl -X POST http://127.0.0.1:1734/recording/start \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+停止录制：
+
+```bash
+curl -X POST http://127.0.0.1:1734/recording/stop
+```
+
+默认启动录制会使用当前可见的第一块屏幕作为截图源，并使用 `recordInterval=15`、不限制录制时段的配置。需要覆盖配置时，可传入：
+
+```bash
+curl -X POST http://127.0.0.1:1734/recording/start \
+  -H 'Content-Type: application/json' \
+  -d '{"config":{"recordInterval":10,"enableRecordingHours":false}}'
+```
+
+模型配置验证可以在应用设置页执行，也可以调用后端接口。请不要把真实 API Key 写入命令历史或日志。
+
+### CLI 套件
+
+MineContext 现在随源码和安装包分发 CLI-Anything harness，路径为 `agent-harness/`。CLI 是 MineContext 的控制面，依赖本机 MineContext runtime；它可以单独作为 Python 包安装，但不能脱离 MineContext 后端和 Electron control API 独立工作。
+
+#### 快速安装
+
+源码开发时安装 CLI：
+
+```bash
+cd MineContext
+python3 -m pip install -e ./agent-harness
+cli-anything-minecontext --json service doctor
+```
+
+也可以使用安装脚本：
+
+```bash
+cd MineContext
+./scripts/install-cli.sh
+```
+
+从 macOS App 安装包安装 CLI：
+
+```bash
+/Applications/MineContext.app/Contents/Resources/cli/install-cli.sh
+cli-anything-minecontext --json service doctor
+```
+
+如果 App 没有安装到 `/Applications/MineContext.app`，先指定 App 路径：
+
+```bash
+export MINECONTEXT_APP_PATH="/path/to/MineContext.app"
+/path/to/MineContext.app/Contents/Resources/cli/install-cli.sh
+```
+
+打包分发包安装后的最短启动路径：
+
+```bash
+cli-anything-minecontext --json service doctor
+cli-anything-minecontext --json service up --record
+cli-anything-minecontext --json recording status
+```
+
+`service up --record` 会优先复用已启动的本地服务；如果服务未启动，源码开发环境下会启动后端和 Electron dev server，普通 macOS 安装环境下会自动打开 `/Applications/MineContext.app` 或 `MINECONTEXT_APP_PATH` 指定的 App，然后等待 `1733` 后端和 `1734` Electron control API 就绪，并尝试开始录制。
+
+首次使用仍需要在系统层面完成一次性授权和配置：
+
+- macOS 系统设置中给 MineContext 授予屏幕录制权限。
+- 使用应用设置页或 CLI 保存模型配置，不要把真实 API Key 写入公开文档或日志。
+
+模型配置示例：
+
+```bash
+export ARK_API_KEY="your-api-key"
+cli-anything-minecontext --json config set \
+  --provider doubao \
+  --base-url https://ark.cn-beijing.volces.com/api/v3 \
+  --model doubao-seed-2-0-mini-260428 \
+  --api-key "$ARK_API_KEY" \
+  --embedding-model doubao-embedding-vision-251215
+cli-anything-minecontext --json config validate
+```
+
+#### CLI 命令说明
+
+建议 agent 调用时始终加 `--json`，便于稳定解析输出。
+
+| 场景 | 命令 | 说明 |
+| --- | --- | --- |
+| 检查环境 | `cli-anything-minecontext --json service doctor` | 检查源码 runtime、打包 App、后端、Electron control API 是否可用 |
+| 启动服务 | `cli-anything-minecontext --json service up --record` | 拉起 MineContext runtime，并在就绪后开始录制 |
+| 查看服务 | `cli-anything-minecontext --json service health` | 查看后端和 Electron control API 健康状态 |
+| 开始录制 | `cli-anything-minecontext --json recording start` | 调用本地 control API 开始录制 |
+| 查看录制 | `cli-anything-minecontext --json recording status` | 查看当前录制状态 |
+| 停止录制 | `cli-anything-minecontext --json recording stop` | 停止录制 |
+| 查看模型配置 | `cli-anything-minecontext --json config get` | 读取当前模型配置 |
+| 验证模型配置 | `cli-anything-minecontext --json config validate` | 验证当前模型配置是否可用 |
+| 提问上下文 | `cli-anything-minecontext --json chat ask "我刚才在做什么？"` | 通过 Context Agent 基于已采集上下文提问 |
+| 搜索上下文 | `cli-anything-minecontext --json context search "MineContext CLI" --limit 5` | 向量搜索已采集上下文 |
+| 上下文类型 | `cli-anything-minecontext --json context types` | 列出上下文类型 |
+| 待办列表 | `cli-anything-minecontext --json todo list --status 0 --limit 10` | 查看未完成待办 |
+| 完成待办 | `cli-anything-minecontext --json todo done 7` | 标记指定待办完成 |
+| 生成待办 | `cli-anything-minecontext --json todo generate` | 触发待办生成 |
+| 活动摘要 | `cli-anything-minecontext --json activity list --limit 5` | 查看活动摘要 |
+| 智能提示 | `cli-anything-minecontext --json tips list --limit 5` | 查看智能提示 |
+| 报告 | `cli-anything-minecontext --json report list --limit 5` | 查看报告 |
+| 监控概览 | `cli-anything-minecontext --json monitoring overview` | 查看监控概览 |
+| 录制统计 | `cli-anything-minecontext --json monitoring recording-stats` | 查看录制统计 |
+| 后端透传 | `cli-anything-minecontext --json api get /api/debug/todos -p limit=5` | 调用尚未封装成语义命令的后端 API |
+| Control 透传 | `cli-anything-minecontext --json control get /recording/status` | 调用尚未封装成语义命令的 Electron control API |
+
+不带子命令运行会进入交互模式：
+
+```bash
+cli-anything-minecontext
+```
+
+### 后续使用
+
+1. 打开 Electron 应用，进入 Settings 配置或确认模型信息。
+2. 在 macOS 系统设置中给 Electron/MineContext 授予屏幕录制权限。
+3. 在 Screen Monitor 中选择截图区域，点击 Start Recording；或直接调用 `http://127.0.0.1:1734/recording/start` 自动选择第一块可见屏幕并开始录制。
+4. 等待后台逐步生成活动、待办、提示和报告。
+5. 通过 `http://localhost:1733` 查看后端调试页，通过应用内 Chat with AI 基于上下文提问或创作。
 
 ### 应用打包
 
 为 macOS 平台构建应用：
 
 ```bash
+cd frontend
 pnpm build:mac
 ```
 
-打包生成的可执行文件会存放在`MineContext/frontend/dist`目录下。
+打包生成的可执行文件会存放在 `MineContext/frontend/dist` 目录下。安装包会把 `agent-harness/` 一起放入 App 资源目录 `Contents/Resources/cli/agent-harness`，并把 CLI 安装脚本放入 `Contents/Resources/cli/install-cli.sh`，便于在普通设备上随 MineContext runtime 一起安装 CLI。
 
 ## 🏗️ 后端架构
 
@@ -349,29 +588,20 @@ uv sync
 
 ### 配置
 
-1. **基本配置** (`config/config.yaml`)：
+1. **环境变量配置**：
 
-```yaml
-server:
-  host: 127.0.0.1
-  port: 8765
-  debug: false
+默认配置文件 `config/config.yaml` 会读取环境变量。推荐使用项目根目录 `.env` 管理本地密钥：
 
-embedding_model:
-  provider: doubao # 选项：openai, doubao
-  api_key: your-api-key
-  model: doubao-embedding-vision-250615
+```bash
+LLM_PROVIDER=doubao
+LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+LLM_MODEL=doubao-seed-2-0-mini-260428
+LLM_API_KEY=your-ark-api-key
 
-vlm_model:
-  provider: doubao # 选项：openai, doubao
-  api_key: your-api-key
-  model: doubao-seed-1-6-flash-250828
-
-capture:
-  enabled: true
-  screenshot:
-    enabled: true # 开启截图捕获
-    capture_interval: 5 # 截图间隔（秒）
+EMBEDDING_PROVIDER=doubao
+EMBEDDING_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+EMBEDDING_MODEL=doubao-embedding-vision-251215
+EMBEDDING_API_KEY=your-ark-api-key
 ```
 
 2. **提示模板** (`config/prompts_*.yaml`)：
@@ -382,6 +612,9 @@ capture:
 
 ```bash
 # 使用默认配置启动
+set -a
+source .env
+set +a
 uv run opencontext start
 
 # 使用自定义配置启动

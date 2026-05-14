@@ -16,6 +16,17 @@ extraResources:
     to: backend/
     filter:
       - '**/*'
+  - from: ../agent-harness/
+    to: cli/agent-harness/
+    filter:
+      - '**/*'
+      - '!build/**'
+      - '!**/.venv/**'
+      - '!**/.pytest_cache/**'
+      - '!**/__pycache__/**'
+      - '!**/*.egg-info/**'
+  - from: ../scripts/install-cli.sh
+    to: cli/install-cli.sh
 asarUnpack:
   - resources/**
 win:

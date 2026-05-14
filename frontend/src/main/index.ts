@@ -29,6 +29,7 @@ import { ScreenMonitorTask } from './background/task/screen-monitor-task'
 import { autoUpdater } from 'electron-updater'
 import { IpcChannel } from '@shared/IpcChannel'
 import { LatestActivityTask } from './background/task/latest-activity'
+import { startAutomationControlServer } from './services/AutomationControlService'
 
 initLog()
 const logger = getLogger('MainEntry')
@@ -257,6 +258,7 @@ app.whenReady().then(() => {
   // Start screenshot cleanup scheduled task
   startScreenshotCleanup()
   task.init()
+  server = startAutomationControlServer(task)
   latestActivityTask.init()
 
   app.on('activate', function () {
