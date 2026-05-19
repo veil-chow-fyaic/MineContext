@@ -33,6 +33,19 @@ else
   "$PYTHON_BIN" -m pip install "$HARNESS_DIR"
 fi
 
+USER_BASE="$("$PYTHON_BIN" -m site --user-base 2>/dev/null || true)"
+USER_BIN="${USER_BASE:+$USER_BASE/bin}"
+
+if ! command -v cli-anything-minecontext >/dev/null 2>&1; then
+  if [[ -n "$USER_BIN" ]]; then
+    echo "Note: cli-anything-minecontext is not on PATH yet." >&2
+    echo "Add this to your shell profile if needed:" >&2
+    echo "  export PATH=\"$USER_BIN:\$PATH\"" >&2
+  else
+    echo "Note: cli-anything-minecontext is not on PATH yet." >&2
+  fi
+fi
+
 cat <<EOF
 MineContext CLI installed from:
   $HARNESS_DIR

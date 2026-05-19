@@ -20,7 +20,7 @@ import { NotificationService } from './services/NotificationService'
 import { proxyManager } from './services/ProxyManager'
 import storeSyncService from './services/StoreSyncService'
 import db from './services/DatabaseService'
-import { getBackendPort, getBackendStatus } from './backend'
+import { getBackendPort, getBackendStatus, refreshBackendStatusFromRunningService } from './backend'
 
 // 确保数据库已初始化的辅助函数
 async function ensureDbInitialized() {
@@ -535,7 +535,8 @@ export function registerIpc(mainWindow: BrowserWindow, app: Electron.App) {
     return getBackendPort()
   })
 
-  ipcMain.handle(IpcChannel.Backend_GetStatus, () => {
+  ipcMain.handle(IpcChannel.Backend_GetStatus, async () => {
+    await refreshBackendStatusFromRunningService(mainWindow)
     return {
       status: getBackendStatus(),
       port: getBackendPort(),

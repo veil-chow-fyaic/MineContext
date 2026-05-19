@@ -16,7 +16,7 @@ class MineContextError(RuntimeError):
 class MineContextClient:
     backend_url: str = "http://127.0.0.1:1733"
     control_url: str = "http://127.0.0.1:1734"
-    timeout: float = 5.0
+    timeout: float = 60.0
 
     def backend(self, method: str, path: str, body: dict[str, Any] | None = None, params: dict[str, str] | None = None) -> Any:
         return self.request(method, self.backend_url, path, body=body, params=params)

@@ -28,17 +28,18 @@ recording, OCR, embedding, vector search, chat, or context processing logic.
 
 Command groups:
 
-- `service`: health and startup checks; `service up --record` supports source
-  checkouts and packaged macOS apps
+- `service`: health, startup, and distributable smoke checks; `service up
+  --record` supports source checkouts and packaged macOS apps
 - `recording`: start, stop, status
 - `config`: get and validate model settings
 - `chat`: ask questions through the Context Agent
+- `summary`: date-oriented daily summary access for agent workflows
 - `context`: list types and vector search
 - `vault`: document CRUD
 - `todo`: list, complete, reopen, generate
 - `activity`: list and generate summaries
 - `tips`: list and generate tips
-- `report`: list and generate reports
+- `report`: list, read, and generate reports
 - `monitoring`: overview and recording stats
 - `api`: backend API passthrough
 - `control`: Electron control API passthrough
@@ -49,6 +50,23 @@ Command groups:
 - Use semantic commands first
 - Use `api` and `control` passthrough commands for missing coverage
 - Non-zero exits indicate unavailable services or invalid requests
+- After install or before distribution, run `service smoke` to validate backend,
+  model settings, recording status, daily summary lookup, and chat in one step
+
+## Quality Gate
+
+Before publishing or handing the CLI to another machine:
+
+```bash
+python -m pytest -q
+cli-anything-minecontext --json service doctor
+cli-anything-minecontext --json service smoke --date YYYY-MM-DD
+cli-anything-minecontext --json summary day YYYY-MM-DD
+cli-anything-minecontext --json chat ask "只回答 cli-chat-ok"
+```
+
+`service smoke --skip-chat` may be used when avoiding model cost, but release
+validation should include chat at least once.
 
 ## Known Limitations
 

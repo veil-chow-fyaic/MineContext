@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import sys
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,7 @@ from cli_anything.minecontext.utils.runtime import (
     start_backend,
     start_frontend,
     start_packaged_app,
+    stop_stale_dev_frontend,
     wait_until,
 )
 
@@ -71,7 +74,7 @@ def handle_error(func):
 @click.option("--json", "use_json", is_flag=True, help="Output as JSON.")
 @click.option("--backend-url", default=None, help="MineContext backend URL.")
 @click.option("--control-url", default=None, help="MineContext Electron control API URL.")
-@click.option("--timeout", default=5.0, show_default=True, type=float, help="HTTP timeout in seconds.")
+@click.option("--timeout", default=60.0, show_default=True, type=float, help="HTTP timeout in seconds.")
 @click.version_option(__version__)
 @click.pass_context
 def main(ctx: click.Context, use_json: bool, backend_url: str | None, control_url: str | None, timeout: float) -> None:
@@ -96,6 +99,42 @@ def service():
 def service_health():
     """Check backend and Electron control API health."""
     output(get_client().health())
+
+
+@service.command("smoke")
+@click.option("--date", "summary_date", default="today", help="Daily summary date to verify, or today.")
+@click.option("--skip-summary", is_flag=True, help="Skip daily summary lookup.")
+@click.option("--skip-chat", is_flag=True, help="Skip Context Agent chat check.")
+@click.option("--skip-ui", is_flag=True, help="Skip Electron renderer readiness check.")
+@click.option("--require-recording", is_flag=True, help="Fail unless recording is running.")
+@handle_error
+def service_smoke(summary_date: str, skip_summary: bool, skip_chat: bool, skip_ui: bool, require_recording: bool):
+    """Run a distributable end-to-end CLI smoke test."""
+    checks: dict[str, Any] = {}
+    checks["health"] = probe(lambda: get_client().health())
+    checks["model"] = probe(lambda: get_client().validate_model_settings())
+    checks["recording"] = probe(lambda: get_client().recording_status())
+
+    if not skip_ui:
+        checks["ui"] = probe(assert_ui_ready)
+
+    if not skip_summary:
+        checks["summary"] = probe(lambda: assert_daily_report_usable(summary_date))
+
+    if not skip_chat:
+        checks["chat"] = probe(
+            lambda: get_client().backend("POST", "/api/agent/chat", body={"query": "只回答 cli-smoke-ok"})
+        )
+
+    ok = all(check.get("ok") for check in checks.values())
+    if require_recording:
+        status = checks.get("recording", {}).get("response", {}).get("data", {}).get("status")
+        ok = ok and status == "running"
+
+    result = {"ok": ok, "checks": checks}
+    output(result)
+    if not ok and not _repl_mode:
+        raise SystemExit(1)
 
 
 @service.command("doctor")
@@ -128,22 +167,33 @@ def service_setup(minecontext_dir: str | None):
 
 @service.command("up")
 @click.option("--record", is_flag=True, help="Start recording after services are ready.")
+@click.option("--no-ui/--show-ui", default=True, show_default=True, help="Keep Electron running in the background without showing the main window.")
 @click.option("--minecontext-dir", default=None, type=click.Path(file_okay=False))
+@click.option("--user-data-dir", default=None, type=click.Path(file_okay=False), help="Override Electron userData directory for clean-room validation.")
+@click.option("--restart-frontend", is_flag=True, help="Restart the Electron frontend before checking the control API.")
 @click.option("--wait", default=45.0, show_default=True, type=float)
 @handle_error
-def service_up(record: bool, minecontext_dir: str | None, wait: float):
+def service_up(record: bool, no_ui: bool, minecontext_dir: str | None, user_data_dir: str | None, restart_frontend: bool, wait: float):
     """Start missing MineContext services, optionally start recording."""
     client = get_client()
     root = resolve_minecontext_dir(minecontext_dir)
     checks = inspect_runtime(root)
     app_path = resolve_packaged_app_path()
+    resolved_user_data_dir = Path(user_data_dir).expanduser().resolve() if user_data_dir else None
     actions = []
+    restarted_frontend = False
+
+    if restart_frontend and can_start_dev_runtime(checks):
+        stopped = stop_stale_dev_frontend(root)
+        restarted_frontend = True
+        if stopped:
+            actions.append({"service": "frontend", "action": "stop-stale", "pids": stopped})
 
     if not probe(lambda: client.backend("GET", "/api/health"))["ok"]:
         if can_start_dev_runtime(checks):
             actions.append({"service": "backend", "action": "start", "log": str(start_backend(root))})
         elif checks["has_packaged_app"]:
-            actions.append({"service": "app", "action": "open", "path": str(app_path), "log": str(start_packaged_app(app_path))})
+            actions.append({"service": "app", "action": "open", "path": str(app_path), "no_ui": no_ui, "user_data_dir": str(resolved_user_data_dir) if resolved_user_data_dir else None, "log": str(start_packaged_app(app_path, no_ui=no_ui, user_data_dir=resolved_user_data_dir))})
         else:
             output({"ok": False, "actions": actions, "error": "no startable MineContext runtime found", "runtime": checks})
             if not _repl_mode:
@@ -156,11 +206,17 @@ def service_up(record: bool, minecontext_dir: str | None, wait: float):
             raise SystemExit(1)
         return
 
-    if not probe(lambda: client.control("GET", "/health"))["ok"]:
+    control_ok = probe(lambda: client.control("GET", "/health"))["ok"]
+    if restarted_frontend:
+        actions.append({"service": "frontend", "action": "start", "no_ui": no_ui, "user_data_dir": str(resolved_user_data_dir) if resolved_user_data_dir else None, "log": str(start_frontend(root, no_ui=no_ui, user_data_dir=resolved_user_data_dir))})
+    elif not control_ok:
         if can_start_dev_runtime(checks):
-            actions.append({"service": "frontend", "action": "start", "log": str(start_frontend(root))})
+            stopped = stop_stale_dev_frontend(root)
+            if stopped:
+                actions.append({"service": "frontend", "action": "stop-stale", "pids": stopped})
+            actions.append({"service": "frontend", "action": "start", "no_ui": no_ui, "user_data_dir": str(resolved_user_data_dir) if resolved_user_data_dir else None, "log": str(start_frontend(root, no_ui=no_ui, user_data_dir=resolved_user_data_dir))})
         elif checks["has_packaged_app"] and not any(item["service"] == "app" for item in actions):
-            actions.append({"service": "app", "action": "open", "path": str(app_path), "log": str(start_packaged_app(app_path))})
+            actions.append({"service": "app", "action": "open", "path": str(app_path), "no_ui": no_ui, "user_data_dir": str(resolved_user_data_dir) if resolved_user_data_dir else None, "log": str(start_packaged_app(app_path, no_ui=no_ui, user_data_dir=resolved_user_data_dir))})
         elif not checks["has_packaged_app"]:
             output({"ok": False, "actions": actions, "error": "Electron control API is down and no packaged app was found", "runtime": checks})
             if not _repl_mode:
@@ -178,6 +234,7 @@ def service_up(record: bool, minecontext_dir: str | None, wait: float):
         {
             "ok": True,
             "minecontext_dir": str(root),
+            "user_data_dir": str(resolved_user_data_dir) if resolved_user_data_dir else None,
             "actions": actions,
             "backend": client.backend("GET", "/api/health"),
             "control": client.control("GET", "/health"),
@@ -215,6 +272,39 @@ def recording_start(config_json: str | None, interval: int | None):
 def recording_stop():
     """Stop recording."""
     output(get_client().recording_stop())
+
+
+@main.group()
+def window():
+    """Electron window visibility commands."""
+
+
+@window.command("status")
+@handle_error
+def window_status():
+    """Show window visibility status."""
+    output(get_client().control("GET", "/window/status"))
+
+
+@window.command("ui-status")
+@handle_error
+def window_ui_status():
+    """Show Electron renderer readiness status."""
+    output(get_client().control("GET", "/ui/status"))
+
+
+@window.command("show")
+@handle_error
+def window_show():
+    """Show and focus the main window."""
+    output(get_client().control("POST", "/window/show"))
+
+
+@window.command("hide")
+@handle_error
+def window_hide():
+    """Hide the main window without stopping services."""
+    output(get_client().control("POST", "/window/hide"))
 
 
 @main.group()
@@ -289,6 +379,19 @@ def chat_ask(query: str, session_id: str | None, context_json: str | None):
     if context:
         body["context"] = context
     output(get_client().backend("POST", "/api/agent/chat", body=body))
+
+
+@main.group()
+def summary():
+    """Daily and weekly summary commands."""
+
+
+@summary.command("day")
+@click.argument("summary_date")
+@handle_error
+def summary_day(summary_date: str):
+    """Read one day's summary by date, e.g. 2026-05-17."""
+    output(read_daily_report(summary_date))
 
 
 @main.group()
@@ -442,6 +545,22 @@ def report_list(limit: int, offset: int):
     output(get_client().backend("GET", "/api/debug/reports", params={"limit": str(limit), "offset": str(offset)}))
 
 
+@report.command("read")
+@click.option("--date", "report_date", default=None, help="Daily report date, e.g. 2026-05-17.")
+@click.option("--id", "report_id", default=None, type=int, help="Vault document id.")
+@handle_error
+def report_read(report_date: str | None, report_id: int | None):
+    """Read a report by date or document id."""
+    if report_id is None and report_date is None:
+        raise click.ClickException("use --date YYYY-MM-DD or --id DOCUMENT_ID")
+    if report_id is not None and report_date is not None:
+        raise click.ClickException("use either --date or --id")
+    if report_id is not None:
+        output(get_client().backend("GET", f"/api/vaults/{report_id}"))
+        return
+    output(read_daily_report(report_date or ""))
+
+
 @report.command("generate")
 @click.option("--start-time", type=int, default=None)
 @click.option("--end-time", type=int, default=None)
@@ -578,12 +697,131 @@ def probe(fn) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+def assert_ui_ready() -> dict[str, Any]:
+    response = get_client().control("GET", "/ui/status")
+    data = response.get("data", {}) if isinstance(response, dict) else {}
+    if not data.get("ready"):
+        raise MineContextError(f"Electron UI is not ready: {data}")
+    return response
+
+
 def read_content(content: str | None, content_file: str | None) -> str:
     if content is not None and content_file is not None:
         raise click.ClickException("use either --content or --file")
     if content_file:
         return Path(content_file).read_text(encoding="utf-8")
     return content or ""
+
+
+def read_daily_report(raw_date: str) -> dict[str, Any]:
+    report_date = normalize_date(raw_date)
+    items = list_reports_for_lookup()
+    expected_title = f"Daily Report - {report_date}"
+    mismatched_reports: list[dict[str, Any]] = []
+    mismatched_report_ids: set[Any] = set()
+
+    for item in items:
+        if item.get("document_type") == "DailyReport" and item.get("title") == expected_title:
+            content_date = extract_daily_report_content_date(str(item.get("content") or ""))
+            if content_date and content_date != report_date:
+                append_mismatched_report(mismatched_reports, mismatched_report_ids, item, content_date)
+                continue
+            return {"success": True, "date": report_date, "data": item}
+
+    for item in items:
+        title = str(item.get("title") or "")
+        if item.get("document_type") == "DailyReport" and report_date in title:
+            content_date = extract_daily_report_content_date(str(item.get("content") or ""))
+            if content_date and content_date != report_date:
+                append_mismatched_report(mismatched_reports, mismatched_report_ids, item, content_date)
+                continue
+            return {"success": True, "date": report_date, "data": item, "matched_by": "title_contains_date"}
+
+    if mismatched_reports:
+        raise MineContextError(
+            f"daily report date mismatch for {report_date}; mismatched reports: {mismatched_reports[:20]}"
+        )
+
+    available = [
+        item.get("title")
+        for item in items
+        if item.get("document_type") == "DailyReport" and item.get("title")
+    ]
+    raise MineContextError(f"daily report not found for {report_date}; available reports: {available[:20]}")
+
+
+def assert_daily_report_usable(raw_date: str) -> dict[str, Any]:
+    report = read_daily_report(raw_date)
+    content = str(report.get("data", {}).get("content") or "")
+    if "No activity data available" not in content:
+        return report
+
+    report_date = report["date"]
+    activities = get_client().backend(
+        "GET",
+        "/api/debug/activities",
+        params={
+            "start_time": f"{report_date}T00:00:00",
+            "end_time": f"{report_date}T23:59:59",
+            "limit": "1",
+            "offset": "0",
+        },
+    )
+    total = activities.get("data", {}).get("total", 0)
+    if total:
+        raise MineContextError(
+            f"daily report for {report_date} is stale: report says no activity, but {total} activity records exist"
+        )
+    return report
+
+
+def normalize_date(raw_date: str) -> str:
+    if raw_date == "today":
+        return date.today().isoformat()
+    try:
+        return datetime.strptime(raw_date, "%Y-%m-%d").date().isoformat()
+    except ValueError as exc:
+        raise click.ClickException("date must be YYYY-MM-DD or today") from exc
+
+
+def extract_daily_report_content_date(content: str) -> str | None:
+    match = re.search(r"^#\s*日报\s*-\s*(\d{4})年(\d{2})月(\d{2})日\b", content, flags=re.MULTILINE)
+    if not match:
+        return None
+    return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+
+
+def append_mismatched_report(
+    mismatched_reports: list[dict[str, Any]],
+    seen_ids: set[Any],
+    item: dict[str, Any],
+    content_date: str,
+) -> None:
+    report_id = item.get("id")
+    if report_id in seen_ids:
+        return
+    seen_ids.add(report_id)
+    mismatched_reports.append({"id": report_id, "title": item.get("title"), "content_date": content_date})
+
+
+def list_reports_for_lookup() -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    limit = 100
+    offset = 0
+    while True:
+        response = get_client().backend(
+            "GET",
+            "/api/debug/reports",
+            params={"limit": str(limit), "offset": str(offset)},
+        )
+        page = response.get("data", {}).get("reports", [])
+        if not page:
+            break
+        reports.extend(page)
+        if len(page) < limit:
+            break
+        offset += limit
+    return reports
 
 
 if __name__ == "__main__":

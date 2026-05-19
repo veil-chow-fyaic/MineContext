@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import signal
 import shutil
 import subprocess
 import time
@@ -69,7 +70,7 @@ def resolve_packaged_app_path(value: str | None = None) -> Path:
     return Path.home() / "Applications" / "MineContext"
 
 
-def start_packaged_app(app_path: Path | None = None) -> Path:
+def start_packaged_app(app_path: Path | None = None, no_ui: bool = True, user_data_dir: Path | None = None) -> Path:
     resolved = app_path or resolve_packaged_app_path()
     log_path = log_dir() / "app.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,8 +79,24 @@ def start_packaged_app(app_path: Path | None = None) -> Path:
         raise RuntimeError(f"MineContext packaged app not found: {resolved}")
 
     if platform.system() == "Darwin":
+        env = os.environ.copy()
+        if no_ui:
+            env["MINECONTEXT_NO_UI"] = "1"
+        if user_data_dir:
+            env["MINECONTEXT_USER_DATA_DIR"] = str(user_data_dir)
+
+        executable = resolved / "Contents" / "MacOS" / "MineContext"
         with log_path.open("ab") as log_file:
-            subprocess.Popen(["open", str(resolved)], stdout=log_file, stderr=subprocess.STDOUT)
+            if executable.exists():
+                subprocess.Popen([str(executable)], env=env, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
+            else:
+                command = ["open"]
+                if no_ui:
+                    command.extend(["--env", "MINECONTEXT_NO_UI=1"])
+                if user_data_dir:
+                    command.extend(["--env", f"MINECONTEXT_USER_DATA_DIR={user_data_dir}"])
+                command.append(str(resolved))
+                subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT)
         return log_path
 
     raise RuntimeError("Starting packaged MineContext is currently supported on macOS only")
@@ -92,13 +109,51 @@ def start_backend(minecontext_dir: Path, port: int = 1733) -> Path:
     return log_path
 
 
-def start_frontend(minecontext_dir: Path) -> Path:
+def start_frontend(minecontext_dir: Path, no_ui: bool = True, user_data_dir: Path | None = None) -> Path:
     log_path = log_dir() / "frontend.log"
     env = os.environ.copy()
     env.setdefault("PYTHON", "/usr/bin/python3")
     env.setdefault("npm_config_python", "/usr/bin/python3")
+    if no_ui:
+        env["MINECONTEXT_NO_UI"] = "1"
+    if user_data_dir:
+        env["MINECONTEXT_USER_DATA_DIR"] = str(user_data_dir)
     spawn(["pnpm", "dev"], minecontext_dir / "frontend", log_path, env)
     return log_path
+
+
+def stop_stale_dev_frontend(minecontext_dir: Path) -> list[int]:
+    """Stop dev Electron instances that can block a fresh control API startup."""
+    if platform.system() != "Darwin":
+        return []
+
+    frontend_dir = str((minecontext_dir / "frontend").resolve())
+    patterns = [
+        f"{frontend_dir}.*electron-vite",
+        f"{frontend_dir}.*pnpm dev",
+        f"{frontend_dir}.*/Electron\\.app/Contents/MacOS/Electron",
+    ]
+    stopped: list[int] = []
+
+    for pattern in patterns:
+        result = subprocess.run(["pgrep", "-f", pattern], text=True, capture_output=True, check=False)
+        for raw_pid in result.stdout.splitlines():
+            try:
+                pid = int(raw_pid.strip())
+            except ValueError:
+                continue
+            if pid == os.getpid() or pid in stopped:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                stopped.append(pid)
+            except ProcessLookupError:
+                continue
+
+    if stopped:
+        time.sleep(1)
+
+    return stopped
 
 
 def wait_until(check: Callable[[], bool], timeout: float, interval: float = 0.5) -> bool:

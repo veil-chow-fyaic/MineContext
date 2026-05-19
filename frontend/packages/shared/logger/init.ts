@@ -25,9 +25,10 @@ export const initLog = () => {
   log.initialize()
 
   const isDev = process.env.NODE_ENV === 'development' || is.dev
+  const enableConsoleLogs = process.env.MINECONTEXT_CONSOLE_LOGS === '1'
 
   // --- Console Transport Configuration ---
-  log.transports.console.level = isDev ? 'debug' : 'warn'
+  log.transports.console.level = enableConsoleLogs ? (isDev ? 'debug' : 'warn') : false
   log.transports.console.format = isDev
     ? '[{h}:{i}:{s}.{ms}] [{level}]› {scope} › {text}' // More detailed during development
     : '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] [{scope}] {text}' // Include date in production

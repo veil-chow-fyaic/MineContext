@@ -438,6 +438,18 @@ cli-anything-minecontext --json recording status
 
 `service up --record` 会优先复用已启动的本地服务；如果服务未启动，源码开发环境下会启动后端和 Electron dev server，普通 macOS 安装环境下会自动打开 `/Applications/MineContext.app` 或 `MINECONTEXT_APP_PATH` 指定的 App，然后等待 `1733` 后端和 `1734` Electron control API 就绪，并尝试开始录制。
 
+CLI 启动默认使用后台无 UI 模式：Electron 主进程仍会运行，录屏、托盘、后端 API 和 control API 照常可用，但不会弹出主窗口。需要显示主窗口时可以执行：
+
+```bash
+cli-anything-minecontext --json window show
+```
+
+如果希望启动时直接显示 UI：
+
+```bash
+cli-anything-minecontext --json service up --record --show-ui
+```
+
 首次使用仍需要在系统层面完成一次性授权和配置：
 
 - macOS 系统设置中给 MineContext 授予屏幕录制权限。
@@ -465,12 +477,17 @@ cli-anything-minecontext --json config validate
 | 检查环境 | `cli-anything-minecontext --json service doctor` | 检查源码 runtime、打包 App、后端、Electron control API 是否可用 |
 | 启动服务 | `cli-anything-minecontext --json service up --record` | 拉起 MineContext runtime，并在就绪后开始录制 |
 | 查看服务 | `cli-anything-minecontext --json service health` | 查看后端和 Electron control API 健康状态 |
+| 分发验收 | `cli-anything-minecontext --json service smoke --date 2026-05-17` | 一次性验证后端、模型、录屏状态、日报读取和 AI 对话 |
 | 开始录制 | `cli-anything-minecontext --json recording start` | 调用本地 control API 开始录制 |
 | 查看录制 | `cli-anything-minecontext --json recording status` | 查看当前录制状态 |
 | 停止录制 | `cli-anything-minecontext --json recording stop` | 停止录制 |
+| 查看窗口状态 | `cli-anything-minecontext --json window status` | 查看主窗口是否存在、是否可见 |
+| 显示窗口 | `cli-anything-minecontext --json window show` | 显示并聚焦主窗口 |
+| 隐藏窗口 | `cli-anything-minecontext --json window hide` | 隐藏主窗口，服务和录制继续运行 |
 | 查看模型配置 | `cli-anything-minecontext --json config get` | 读取当前模型配置 |
 | 验证模型配置 | `cli-anything-minecontext --json config validate` | 验证当前模型配置是否可用 |
 | 提问上下文 | `cli-anything-minecontext --json chat ask "我刚才在做什么？"` | 通过 Context Agent 基于已采集上下文提问 |
+| 查看某天日报 | `cli-anything-minecontext --json summary day 2026-05-17` | 按日期读取某一天的日报/summary，适合 agent 直接调用 |
 | 搜索上下文 | `cli-anything-minecontext --json context search "MineContext CLI" --limit 5` | 向量搜索已采集上下文 |
 | 上下文类型 | `cli-anything-minecontext --json context types` | 列出上下文类型 |
 | 待办列表 | `cli-anything-minecontext --json todo list --status 0 --limit 10` | 查看未完成待办 |
@@ -478,7 +495,8 @@ cli-anything-minecontext --json config validate
 | 生成待办 | `cli-anything-minecontext --json todo generate` | 触发待办生成 |
 | 活动摘要 | `cli-anything-minecontext --json activity list --limit 5` | 查看活动摘要 |
 | 智能提示 | `cli-anything-minecontext --json tips list --limit 5` | 查看智能提示 |
-| 报告 | `cli-anything-minecontext --json report list --limit 5` | 查看报告 |
+| 报告列表 | `cli-anything-minecontext --json report list --limit 5` | 查看报告 |
+| 读取报告 | `cli-anything-minecontext --json report read --date 2026-05-17` | 按日期读取日报，也可用 `--id` 按文档 ID 读取 |
 | 监控概览 | `cli-anything-minecontext --json monitoring overview` | 查看监控概览 |
 | 录制统计 | `cli-anything-minecontext --json monitoring recording-stats` | 查看录制统计 |
 | 后端透传 | `cli-anything-minecontext --json api get /api/debug/todos -p limit=5` | 调用尚未封装成语义命令的后端 API |

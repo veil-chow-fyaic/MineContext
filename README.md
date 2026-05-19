@@ -291,11 +291,18 @@ Common commands:
 
 ```bash
 cli-anything-minecontext --json service up --record
+cli-anything-minecontext --json service up --record --show-ui
+cli-anything-minecontext --json service smoke --date 2026-05-17
 cli-anything-minecontext --json recording status
 cli-anything-minecontext --json recording stop
+cli-anything-minecontext --json window status
+cli-anything-minecontext --json window show
+cli-anything-minecontext --json window hide
 cli-anything-minecontext --json config get
 cli-anything-minecontext --json config validate
-cli-anything-minecontext --json chat ask "What did I work on recently?"
+cli-anything-minecontext --json --timeout 180 chat ask "What did I work on recently?"
+cli-anything-minecontext --json summary day 2026-05-17
+cli-anything-minecontext --json report read --date 2026-05-17
 cli-anything-minecontext --json context search "MineContext CLI" --limit 5
 cli-anything-minecontext --json todo list --status 0
 cli-anything-minecontext --json api get /api/debug/todos -p limit=5
@@ -305,7 +312,15 @@ cli-anything-minecontext --json control get /recording/status
 For agent automation, prefer `--json`. `service up --record` reuses running
 services, starts a source checkout when `uv` and `pnpm` are available, or opens
 the packaged macOS app from `/Applications/MineContext.app` or
-`MINECONTEXT_APP_PATH`.
+`MINECONTEXT_APP_PATH`. It starts Electron in background no-UI mode by default;
+use `--show-ui` or `window show` when a visible window is needed.
+
+Use `service smoke` as the distribution readiness gate. It checks backend
+health, model configuration, recording state, UI readiness, chat, and the daily
+summary path. The summary check fails when a report title date and the Markdown
+heading date disagree, or when the report claims no activity while activity
+records exist for that date. For slower chat checks, put the global timeout
+before the subcommand, for example `--timeout 180 chat ask "..."`.
 
 ### Application Packaging
 

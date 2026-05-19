@@ -1,5 +1,6 @@
 import express from 'express'
 import type { Server } from 'http'
+import { BrowserWindow } from 'electron'
 import type { ScreenSettings } from '../../renderer/src/store/setting'
 import type { ScreenMonitorTask } from '../background/task/screen-monitor-task'
 import { getLogger } from '@shared/logger/main'
@@ -22,6 +23,57 @@ export function startAutomationControlServer(task: ScreenMonitorTask, port = 173
     res.json({
       success: true,
       data: task.getRecordingStatus()
+    })
+  })
+
+  app.get('/window/status', (_, res) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    res.json({
+      success: true,
+      data: {
+        exists: Boolean(mainWindow),
+        visible: mainWindow ? mainWindow.isVisible() : false,
+        minimized: mainWindow ? mainWindow.isMinimized() : false
+      }
+    })
+  })
+
+  app.get('/ui/status', async (_, res) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    const data = await getUiStatus(mainWindow)
+    res.json({
+      success: true,
+      data
+    })
+  })
+
+  app.post('/window/show', (_, res) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    res.json({
+      success: true,
+      data: {
+        exists: Boolean(mainWindow),
+        visible: mainWindow ? mainWindow.isVisible() : false
+      }
+    })
+  })
+
+  app.post('/window/hide', (_, res) => {
+    const mainWindow = BrowserWindow.getAllWindows()[0]
+    if (mainWindow) {
+      mainWindow.hide()
+    }
+    res.json({
+      success: true,
+      data: {
+        exists: Boolean(mainWindow),
+        visible: mainWindow ? mainWindow.isVisible() : false
+      }
     })
   })
 
@@ -57,4 +109,50 @@ export function startAutomationControlServer(task: ScreenMonitorTask, port = 173
   })
 
   return server
+}
+
+async function getUiStatus(mainWindow: BrowserWindow | undefined): Promise<Record<string, unknown>> {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return {
+      exists: false,
+      ready: false
+    }
+  }
+
+  const webContents = mainWindow.webContents
+  let rendererState: Record<string, unknown> = {}
+
+  try {
+    rendererState = await webContents.executeJavaScript(
+      `(() => {
+        const text = document.body?.innerText || ''
+        const inBootstrapLoading = text.includes('Welcome to MineContext') || text.includes('99%')
+        return {
+          title: document.title,
+          textSample: text.slice(0, 300),
+          inBootstrapLoading
+        }
+      })()`,
+      true
+    )
+  } catch (error) {
+    rendererState = {
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  const isLoading = webContents.isLoading()
+  const isCrashed = webContents.isCrashed()
+  const inBootstrapLoading = rendererState.inBootstrapLoading === true
+
+  return {
+    exists: true,
+    visible: mainWindow.isVisible(),
+    minimized: mainWindow.isMinimized(),
+    url: webContents.getURL(),
+    isLoading,
+    isCrashed,
+    ready: !isLoading && !isCrashed && !inBootstrapLoading,
+    renderer: rendererState
+  }
 }

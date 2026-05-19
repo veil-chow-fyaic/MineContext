@@ -32,9 +32,14 @@ import { LatestActivityTask } from './background/task/latest-activity'
 import { startAutomationControlServer } from './services/AutomationControlService'
 
 initLog()
+app.setName('MineContext')
 const logger = getLogger('MainEntry')
 
 autoUpdater.logger = logger
+
+function isNoUiMode(): boolean {
+  return ['1', 'true', 'yes'].includes((process.env.MINECONTEXT_NO_UI || '').toLowerCase())
+}
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -45,8 +50,10 @@ if (!gotLock) {
     const win = BrowserWindow.getAllWindows()[0]
     if (win) {
       if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
+      if (!isNoUiMode()) {
+        win.show()
+        win.focus()
+      }
     }
   })
 }
@@ -120,6 +127,8 @@ function stopScreenshotCleanup() {
 }
 
 function createWindow() {
+  const noUiMode = isNoUiMode()
+
   // Create the browser window.
   const mainWindow = new BrowserWindow({
     width: 1180,
@@ -158,7 +167,12 @@ function createWindow() {
   }
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    if (noUiMode) {
+      mainWindow.hide()
+      logger.info('Window kept hidden because MINECONTEXT_NO_UI is enabled')
+    } else {
+      mainWindow.show()
+    }
   })
 
   // Intercept window close event to hide instead of closing
@@ -193,6 +207,10 @@ const task = new ScreenMonitorTask()
 const latestActivityTask = new LatestActivityTask()
 app.whenReady().then(() => {
   logger.info('app_started', { argv: process.argv, version: app.getVersion() })
+  if (isNoUiMode()) {
+    app.dock?.hide()
+    logger.info('Running in no-UI background mode')
+  }
   monitor.start(5000)
   protocol.registerBufferProtocol('vikingdb', (request, callback) => {
     try {
@@ -239,7 +257,7 @@ app.whenReady().then(() => {
 
     // Automatically open DevTools in development environment
 
-    if (isDev) {
+    if (isDev && !isNoUiMode() && process.env.MINECONTEXT_OPEN_DEVTOOLS === '1') {
       window.webContents.openDevTools()
       console.log('DevTools opened automatically in development mode')
     }
