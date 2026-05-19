@@ -87,6 +87,8 @@ class ReportGenerator:
             return f"Error generating activity report: {str(e)}"
 
     def _find_existing_daily_report(self, title: str) -> Optional[Dict[str, Any]]:
+        from opencontext.storage.global_storage import get_storage
+
         reports = get_storage().get_reports(limit=200, offset=0)
         for report in reports:
             if report.get("document_type") == "DailyReport" and report.get("title") == title:
