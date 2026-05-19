@@ -234,6 +234,38 @@ def test_summary_repair_dates_dry_run_plans_updates_and_empty_conflict_delete():
     assert '"reason": "empty-conflict"' in result.output
 
 
+def test_context_search_maps_limit_to_backend_top_k():
+    fake = FakeClient()
+    result = invoke_with_fake(["--json", "context", "search", "MineContext", "--limit", "3"], fake)
+
+    assert result.exit_code == 0
+    assert fake.calls[-1] == (
+        "backend",
+        "POST",
+        "/api/vector_search",
+        {"query": "MineContext", "top_k": 3},
+        None,
+    )
+
+
+def test_sanitize_for_output_removes_vector_payloads():
+    payload = {
+        "items": [
+            {
+                "title": "todo",
+                "_embedding": [0.1],
+                "nested": {"embedding": [0.2], "vector": [0.3], "text": "keep"},
+            }
+        ],
+        "status": "ok",
+    }
+
+    assert minecontext_cli.sanitize_for_output(payload) == {
+        "items": [{"title": "todo", "nested": {"text": "keep"}}],
+        "status": "ok",
+    }
+
+
 def test_service_smoke_fails_when_ui_is_not_ready():
     fake = FakeClient()
 

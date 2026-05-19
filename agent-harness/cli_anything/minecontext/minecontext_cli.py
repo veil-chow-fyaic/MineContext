@@ -40,6 +40,7 @@ def get_client() -> MineContextClient:
 
 def output(data: Any, message: str = "") -> None:
     global _session
+    data = sanitize_for_output(data)
     if _session is not None:
         _session.last_result = data
     if _json_output:
@@ -49,6 +50,18 @@ def output(data: Any, message: str = "") -> None:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
     else:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def sanitize_for_output(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {
+            key: sanitize_for_output(value)
+            for key, value in data.items()
+            if key not in {"_embedding", "embedding", "vector"}
+        }
+    if isinstance(data, list):
+        return [sanitize_for_output(item) for item in data]
+    return data
 
 
 def handle_error(func):
@@ -428,7 +441,7 @@ def context_types():
 @handle_error
 def context_search(query: str, limit: int, context_type: str | None):
     """Vector search captured context."""
-    body = {"query": query, "limit": limit}
+    body = {"query": query, "top_k": limit}
     if context_type:
         body["type"] = context_type
     output(get_client().backend("POST", "/api/vector_search", body=body))
@@ -820,7 +833,7 @@ def append_mismatched_report(
 
 
 def normalize_daily_report_content(content: str) -> str:
-    normalized = content.strip()
+    normalized = content
     outer_fence = re.match(
         r"^\s*```(?:markdown)?\s*\n([\s\S]*?)\n```\s*$",
         normalized,
@@ -843,7 +856,7 @@ def daily_report_audit_entries() -> list[dict[str, Any]]:
         normalized_content = normalize_daily_report_content(content)
         title_date_match = re.match(r"^Daily Report - (\d{4}-\d{2}-\d{2})$", title)
         title_date = title_date_match.group(1) if title_date_match else None
-        content_date = extract_daily_report_content_date(normalized_content)
+        content_date = extract_daily_report_content_date(normalized_content.strip())
         no_activity = "No activity data available for the specified time range." in content
         expected_title = f"Daily Report - {content_date}" if content_date else None
         status = "ok"
@@ -882,7 +895,7 @@ def repair_daily_report_dates(apply_changes: bool) -> dict[str, Any]:
     for item in reports:
         original_content = str(item.get("content") or "")
         content = normalize_daily_report_content(original_content)
-        content_date = extract_daily_report_content_date(content)
+        content_date = extract_daily_report_content_date(content.strip())
         if not content_date:
             continue
         expected_title = f"Daily Report - {content_date}"
