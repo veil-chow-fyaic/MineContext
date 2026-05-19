@@ -322,6 +322,13 @@ heading date disagree, or when the report claims no activity while activity
 records exist for that date. For slower chat checks, put the global timeout
 before the subcommand, for example `--timeout 180 chat ask "..."`.
 
+Daily report dates refer to the day being summarized, not the generation day.
+For example, the 2026-05-19 report is generated on 2026-05-20 after 2026-05-19
+has completed, and both the vault title and Markdown heading must use
+2026-05-19. Use `summary audit` to find legacy shifted reports and
+`summary repair-dates` to dry-run title repairs before applying them with
+`--apply`.
+
 ### Application Packaging
 
 To build APP for macOS:

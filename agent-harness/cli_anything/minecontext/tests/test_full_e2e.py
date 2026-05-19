@@ -111,6 +111,37 @@ class FakeMismatchedReportClient(FakeClient):
         return super().backend(method, path, body=body, params=params)
 
 
+class FakeLegacyShiftedReportsClient(FakeClient):
+    def backend(self, method, path, body=None, params=None):
+        if path == "/api/debug/reports":
+            self.calls.append(("backend", method, path, body, params))
+            return {
+                "data": {
+                    "reports": [
+                        {
+                            "id": 5,
+                            "title": "Daily Report - 2026-05-17",
+                            "content": "# 日报 - 2026年05月16日\n\ncontent",
+                            "document_type": "DailyReport",
+                        },
+                        {
+                            "id": 4,
+                            "title": "Daily Report - 2026-05-16",
+                            "content": "# 日报 - 2026年05月15日\n\ncontent",
+                            "document_type": "DailyReport",
+                        },
+                        {
+                            "id": 3,
+                            "title": "Daily Report - 2026-05-15",
+                            "content": "No activity data available for the specified time range.",
+                            "document_type": "DailyReport",
+                        },
+                    ]
+                }
+            }
+        return super().backend(method, path, body=body, params=params)
+
+
 def invoke_with_fake(args, fake):
     original = minecontext_cli.MineContextClient
     minecontext_cli.MineContextClient = lambda **kwargs: fake
@@ -180,6 +211,27 @@ def test_summary_day_fails_when_report_title_and_content_date_mismatch():
     assert result.exit_code == 1
     assert "daily report date mismatch for 2026-05-19" in result.output
     assert "2026-05-18" in result.output
+
+
+def test_summary_audit_reports_legacy_shifted_dates():
+    fake = FakeLegacyShiftedReportsClient()
+    result = invoke_with_fake(["--json", "summary", "audit"], fake)
+
+    assert result.exit_code == 0
+    assert '"issue_count": 3' in result.output
+    assert '"content_date": "2026-05-16"' in result.output
+
+
+def test_summary_repair_dates_dry_run_plans_updates_and_empty_conflict_delete():
+    fake = FakeLegacyShiftedReportsClient()
+    result = invoke_with_fake(["--json", "summary", "repair-dates"], fake)
+
+    assert result.exit_code == 0
+    assert '"dry_run": true' in result.output
+    assert '"action": "update"' in result.output
+    assert '"to": "Daily Report - 2026-05-16"' in result.output
+    assert '"action": "delete"' in result.output
+    assert '"reason": "empty-conflict"' in result.output
 
 
 def test_service_smoke_fails_when_ui_is_not_ready():

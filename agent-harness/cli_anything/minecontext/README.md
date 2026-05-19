@@ -115,6 +115,13 @@ The summary check also rejects invalid daily reports. It fails when the report
 title date and the first Markdown heading date disagree, or when a report says
 there is no activity but activity records exist for that date.
 
+Daily report dates mean the day being summarized, not the day the report was
+generated. For example, the report for 2026-05-19 is generated on 2026-05-20
+after the full day has completed, and both the vault title and Markdown heading
+must use 2026-05-19. Use `summary audit` to detect legacy shifted reports and
+`summary repair-dates` to preview a repair plan. Add `--apply` only after
+reviewing the dry-run output.
+
 Chat requests may need more than the default 60 seconds when the Context Agent
 retrieves many local contexts. Put the global timeout before the subcommand, for
 example `cli-anything-minecontext --json --timeout 180 chat ask "..."`.

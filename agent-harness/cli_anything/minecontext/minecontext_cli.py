@@ -394,6 +394,21 @@ def summary_day(summary_date: str):
     output(read_daily_report(summary_date))
 
 
+@summary.command("audit")
+@handle_error
+def summary_audit():
+    """Audit daily report title/content date consistency."""
+    output(audit_daily_reports())
+
+
+@summary.command("repair-dates")
+@click.option("--apply", "apply_changes", is_flag=True, help="Apply the repair plan. Defaults to dry-run.")
+@handle_error
+def summary_repair_dates(apply_changes: bool):
+    """Repair legacy daily report titles so the title date matches the content date."""
+    output(repair_daily_report_dates(apply_changes))
+
+
 @main.group()
 def context():
     """Captured context commands."""
@@ -802,6 +817,118 @@ def append_mismatched_report(
         return
     seen_ids.add(report_id)
     mismatched_reports.append({"id": report_id, "title": item.get("title"), "content_date": content_date})
+
+
+def normalize_daily_report_content(content: str) -> str:
+    normalized = content.strip()
+    outer_fence = re.match(
+        r"^\s*```(?:markdown)?\s*\n([\s\S]*?)\n```\s*$",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if outer_fence:
+        normalized = outer_fence.group(1).strip()
+    while re.search(r"\n```[ \t]*$", normalized):
+        normalized = re.sub(r"\n```[ \t]*$", "", normalized).strip()
+    return normalized
+
+
+def daily_report_audit_entries() -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for item in list_reports_for_lookup():
+        if item.get("document_type") != "DailyReport":
+            continue
+        title = str(item.get("title") or "")
+        content = str(item.get("content") or "")
+        normalized_content = normalize_daily_report_content(content)
+        title_date_match = re.match(r"^Daily Report - (\d{4}-\d{2}-\d{2})$", title)
+        title_date = title_date_match.group(1) if title_date_match else None
+        content_date = extract_daily_report_content_date(normalized_content)
+        no_activity = "No activity data available for the specified time range." in content
+        expected_title = f"Daily Report - {content_date}" if content_date else None
+        status = "ok"
+        if no_activity:
+            status = "no_activity"
+        elif not content_date:
+            status = "missing_content_date"
+        elif title_date != content_date:
+            status = "mismatch"
+        elif normalized_content != content:
+            status = "format_artifact"
+        entries.append(
+            {
+                "id": item.get("id"),
+                "title": title,
+                "title_date": title_date,
+                "content_date": content_date,
+                "expected_title": expected_title,
+                "status": status,
+            }
+        )
+    return entries
+
+
+def audit_daily_reports() -> dict[str, Any]:
+    entries = daily_report_audit_entries()
+    issues = [entry for entry in entries if entry["status"] != "ok"]
+    return {"success": True, "issues": issues, "total": len(entries), "issue_count": len(issues)}
+
+
+def repair_daily_report_dates(apply_changes: bool) -> dict[str, Any]:
+    reports = [item for item in list_reports_for_lookup() if item.get("document_type") == "DailyReport"]
+    reports_by_title = {str(item.get("title") or ""): item for item in reports}
+    planned: list[dict[str, Any]] = []
+
+    for item in reports:
+        original_content = str(item.get("content") or "")
+        content = normalize_daily_report_content(original_content)
+        content_date = extract_daily_report_content_date(content)
+        if not content_date:
+            continue
+        expected_title = f"Daily Report - {content_date}"
+        current_title = str(item.get("title") or "")
+        if current_title != expected_title or content != original_content:
+            planned.append(
+                {
+                    "action": "update",
+                    "id": item.get("id"),
+                    "from": current_title,
+                    "to": expected_title,
+                    "content_date": content_date,
+                    "normalize_content": content != original_content,
+                }
+            )
+
+    planned_updates_by_target = {action["to"] for action in planned if action["action"] == "update"}
+    for title in planned_updates_by_target:
+        existing = reports_by_title.get(title)
+        if not existing:
+            continue
+        content = str(existing.get("content") or "")
+        if "No activity data available for the specified time range." in content:
+            planned.append({"action": "delete", "id": existing.get("id"), "title": title, "reason": "empty-conflict"})
+
+    if not apply_changes:
+        return {"success": True, "dry_run": True, "actions": planned}
+
+    applied: list[dict[str, Any]] = []
+    for action in planned:
+        if action["action"] == "update":
+            item = next(report for report in reports if report.get("id") == action["id"])
+            body = {
+                "title": action["to"],
+                "summary": item.get("summary") or "",
+                "content": normalize_daily_report_content(str(item.get("content") or "")),
+                "tags": item.get("tags"),
+                "document_type": item.get("document_type") or "DailyReport",
+            }
+            response = get_client().backend("POST", f"/api/vaults/{action['id']}", body=body)
+            applied.append({**action, "response": response})
+        elif action["action"] == "delete":
+            response = get_client().backend("DELETE", f"/api/vaults/{action['id']}")
+            applied.append({**action, "response": response})
+
+    return {"success": True, "dry_run": False, "actions": applied}
 
 
 def list_reports_for_lookup() -> list[dict[str, Any]]:

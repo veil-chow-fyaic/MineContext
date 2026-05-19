@@ -488,6 +488,8 @@ cli-anything-minecontext --json config validate
 | 验证模型配置 | `cli-anything-minecontext --json config validate` | 验证当前模型配置是否可用 |
 | 提问上下文 | `cli-anything-minecontext --json chat ask "我刚才在做什么？"` | 通过 Context Agent 基于已采集上下文提问 |
 | 查看某天日报 | `cli-anything-minecontext --json summary day 2026-05-17` | 按日期读取某一天的日报/summary，适合 agent 直接调用 |
+| 审计日报日期 | `cli-anything-minecontext --json summary audit` | 检查日报标题日期和正文标题日期是否一致 |
+| 修复日报日期 | `cli-anything-minecontext --json summary repair-dates` | 预览旧版错位日报修复计划；确认后加 `--apply` 执行 |
 | 搜索上下文 | `cli-anything-minecontext --json context search "MineContext CLI" --limit 5` | 向量搜索已采集上下文 |
 | 上下文类型 | `cli-anything-minecontext --json context types` | 列出上下文类型 |
 | 待办列表 | `cli-anything-minecontext --json todo list --status 0 --limit 10` | 查看未完成待办 |
@@ -503,6 +505,11 @@ cli-anything-minecontext --json config validate
 | Control 透传 | `cli-anything-minecontext --json control get /recording/status` | 调用尚未封装成语义命令的 Electron control API |
 
 不带子命令运行会进入交互模式：
+
+日报日期统一表示“被总结的那一天”，不是“生成当天”。例如 2026-05-19
+的日报会在 2026-05-20 生成，Vault 标题和正文标题都必须使用
+2026-05-19。历史版本可能存在标题日期比正文日期晚一天的问题，可先运行
+`summary audit` 审计，再运行 `summary repair-dates` 预览修复计划。
 
 ```bash
 cli-anything-minecontext
