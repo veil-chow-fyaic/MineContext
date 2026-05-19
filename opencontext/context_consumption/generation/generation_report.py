@@ -102,9 +102,9 @@ class ReportGenerator:
             normalized = fence_match.group(1).strip()
 
         heading = f"# 日报 - {report_date.strftime('%Y年%m月%d日')}"
-        if re.match(r"^#\s*日报\s*-\s*\d{4}年\d{2}月\d{2}日", normalized):
+        if re.match(r"^#\s*(?:日报|活动报告)\s*-\s*", normalized):
             normalized = re.sub(
-                r"^#\s*日报\s*-\s*\d{4}年\d{2}月\d{2}日.*$",
+                r"^#\s*(?:日报|活动报告)\s*-.*$",
                 heading,
                 normalized,
                 count=1,
@@ -269,6 +269,12 @@ class ReportGenerator:
 
         start_time_str = self._format_timestamp(start_time)
         end_time_str = self._format_timestamp(end_time)
+        report_date_str = datetime.datetime.fromtimestamp(start_time).strftime("%Y年%m月%d日")
+        strict_report_scope = (
+            f"\n\n**报告日期**：{report_date_str}\n"
+            "必须只总结这个报告日期内的活动。不要把标题或正文日期写成报告日期之外的日期。"
+            f"最终标题必须是 `# 日报 - {report_date_str}`，不要输出代码块围栏。"
+        )
 
         # Build messages
         messages = [
@@ -279,7 +285,8 @@ class ReportGenerator:
                     start_time_str=start_time_str,
                     end_time_str=end_time_str,
                     hourly_summaries=summaries_formatted,
-                ),
+                )
+                + strict_report_scope,
             },
         ]
 

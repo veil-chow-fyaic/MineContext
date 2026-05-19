@@ -10,6 +10,7 @@ Context consumption manager, responsible for managing and coordinating context c
 """
 
 import asyncio
+import re
 import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -183,19 +184,59 @@ class ConsumptionManager:
             )
             return 24 * 60 * 60
 
-    def _get_last_report_time(self) -> datetime:
-        """Get last daily report generation time from database, return current time if none"""
+    def _parse_daily_report_date(self, title: str) -> Optional[datetime.date]:
+        match = re.match(r"^Daily Report - (\d{4}-\d{2}-\d{2})$", title or "")
+        if not match:
+            return None
+        try:
+            return datetime.strptime(match.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    def _is_completed_daily_report(self, report: Dict[str, Any], report_date: datetime.date) -> bool:
+        title = f"Daily Report - {report_date.strftime('%Y-%m-%d')}"
+        heading = f"# 日报 - {report_date.strftime('%Y年%m月%d日')}"
+        content = (report.get("content") or "").strip()
+        return (
+            report.get("title") == title
+            and bool(content)
+            and content != "No activity data available for the specified time range."
+            and heading in content
+        )
+
+    def _get_last_report_date(self) -> Optional[datetime.date]:
+        """Get latest completed report date from vault titles and content."""
         try:
             reports = get_storage().get_vaults(
-                document_type=VaultType.DAILY_REPORT.value, limit=1, offset=0, is_deleted=False
+                document_type=VaultType.DAILY_REPORT.value, limit=20, offset=0, is_deleted=False
             )
-            if reports:
-                created_at_str = reports[0]["created_at"]
-                if created_at_str:
-                    return datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-            return datetime.now()
+            report_dates = [
+                parsed
+                for report in reports
+                for parsed in [self._parse_daily_report_date(report.get("title", ""))]
+                if parsed is not None and self._is_completed_daily_report(report, parsed)
+            ]
+            return max(report_dates) if report_dates else None
         except Exception:
-            return datetime.now()
+            return None
+
+    def _has_completed_daily_report_for_date(self, report_date: datetime.date) -> bool:
+        try:
+            reports = get_storage().get_vaults(
+                document_type=VaultType.DAILY_REPORT.value, limit=200, offset=0, is_deleted=False
+            )
+            for report in reports:
+                if self._is_completed_daily_report(report, report_date):
+                    return True
+            return False
+        except Exception:
+            return False
+
+    def _get_daily_report_window(self, now: datetime) -> tuple[datetime.date, datetime, datetime]:
+        report_date = (now - timedelta(days=1)).date()
+        start_time = datetime.combine(report_date, datetime.min.time())
+        end_time = start_time + timedelta(days=1)
+        return report_date, start_time, end_time
 
     def _start_report_timer(self):
         """Start daily report timer"""
@@ -203,30 +244,31 @@ class ConsumptionManager:
             logger.info("Report task is disabled, skipping timer start")
             return
 
-        # Get last daily report time from database
-        last_report_time = self._get_last_report_time()
-        self._last_report_date = (
-            last_report_time.date()
-        )  # Record date of last daily report generation
+        # Record latest generated report date to prevent duplicate generation.
+        self._last_report_date = self._get_last_report_date()
 
         def check_and_generate_daily_report():
             if not self._activity_generator or not self._task_enabled.get("report", True):
                 return
             try:
                 now = datetime.now()
-                today = now.date()
 
                 hour, minute = map(int, self._daily_report_time.split(":"))
                 target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
-                if now >= target_time and self._last_report_date != today:
+                report_date, report_start_time, report_end_time = self._get_daily_report_window(now)
+
+                if (
+                    now >= target_time
+                    and self._last_report_date != report_date
+                    and not self._has_completed_daily_report_for_date(report_date)
+                ):
                     try:
-                        end_time = int(now.timestamp())
-                        start_time = int((now - timedelta(days=1)).timestamp())
+                        start_time = int(report_start_time.timestamp())
+                        end_time = int(report_end_time.timestamp())
 
                         asyncio.run(self._activity_generator.generate_report(start_time, end_time))
-                        # Update last report date to prevent duplicate generation on the same day
-                        self._last_report_date = today
+                        self._last_report_date = report_date
                     except Exception as e:
                         logger.exception(f"Failed to generate daily report: {e}")
             except Exception as e:

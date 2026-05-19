@@ -64,6 +64,15 @@ class ReportGeneratorTest(unittest.TestCase):
 
         self.assertEqual(normalized, "# 日报 - 2026年05月19日\n\ncontent")
 
+    def test_normalizes_activity_report_heading_to_daily_template(self):
+        generator = ReportGenerator.__new__(ReportGenerator)
+        normalized = generator._normalize_report_content(
+            "# 活动报告 - 2026-05-18 00:00:00 至 2026-05-19 00:00:00\n\ncontent",
+            datetime.date(2026, 5, 18),
+        )
+
+        self.assertEqual(normalized, "# 日报 - 2026年05月18日\n\ncontent")
+
 
 if __name__ == "__main__":
     unittest.main()
