@@ -12,6 +12,20 @@ const logger = getLogger('GlobalEventService')
 const NORMAL_POLLING_INTERVAL = 30 * 1000 // Normal: 30 seconds
 const MAX_NOTIFICATION_MESSAGE_LENGTH = 180
 
+function formatTipTimeRange(data?: Record<string, any>): string {
+  const startTime = Number(data?.start_time)
+  const endTime = Number(data?.end_time)
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return ''
+  }
+  const formatter = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  return `${formatter.format(new Date(startTime * 1000))}-${formatter.format(new Date(endTime * 1000))}`
+}
+
 class GlobalEventService {
   private static instance: GlobalEventService
   private pollingTimer: NodeJS.Timeout | null = null
@@ -112,8 +126,12 @@ class GlobalEventService {
 
   // Get event title
   private getEventTitle(event: any): string {
+    if (event.type === PushDataTypes.TIP_GENERATED) {
+      const timeRange = formatTipTimeRange(event.data)
+      return timeRange ? `智能提醒 ${timeRange}` : '智能提醒'
+    }
+
     const titleMap: Record<string, string> = {
-      tip: '智能提醒',
       todo: '待办事项',
       activity: '活动通知',
       daily_summary: '每日总结',

@@ -79,9 +79,17 @@ class SmartTipGenerator:
                     "doc_type": "tips",
                     "title": SMART_TIP_TITLE,
                     "content": tip_content,
+                    "start_time": start_time,
+                    "end_time": end_time,
                 },
             )
-            return {"doc_id": str(tip_id), "title": SMART_TIP_TITLE, "content": tip_content}
+            return {
+                "doc_id": str(tip_id),
+                "title": SMART_TIP_TITLE,
+                "content": tip_content,
+                "start_time": start_time,
+                "end_time": end_time,
+            }
 
         except Exception as e:
             logger.exception(f"Failed to generate smart tip: {e}")

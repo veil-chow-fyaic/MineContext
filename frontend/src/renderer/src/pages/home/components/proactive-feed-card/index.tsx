@@ -20,6 +20,7 @@ interface FeedCardProps {
   feedType: PushDataTypes // Card type (used to control styles, icons)
   time: string
   desc?: string
+  timeRange?: string
   doc_id?: string // Optional: document ID, for navigation
   doc_title?: string // Optional: document title, for display
   doc_content?: string // Optional: document content, for display
@@ -37,8 +38,17 @@ function compactFeedDescription(value?: string): string {
   return `${text.slice(0, FEED_DESC_PREVIEW_LENGTH)}…`
 }
 
+function formatTipTimeRange(event: FeedEvent): string {
+  const startTime = Number(event.data.start_time)
+  const endTime = Number(event.data.end_time)
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return ''
+  }
+  return `${dayjs.unix(startTime).format('HH:mm')}-${dayjs.unix(endTime).format('HH:mm')}`
+}
+
 const ProactiveFeedCardItem: FC<FeedCardProps> = (props) => {
-  const { id, feedType, time, desc, doc_content, doc_id } = props
+  const { id, feedType, time, desc, timeRange, doc_content, doc_id } = props
   // const isDocument =
   //   feedType === PushDataTypes.DAILY_SUMMARY_GENERATED || feedType === PushDataTypes.WEEKLY_SUMMARY_GENERATED
   // const { navigateToVault } = useNavigation()
@@ -62,7 +72,7 @@ const ProactiveFeedCardItem: FC<FeedCardProps> = (props) => {
   const [eventIcon, eventTitle] = useMemo(() => {
     switch (feedType) {
       case PushDataTypes.TIP_GENERATED:
-        return ['💡', '智能提醒']
+        return ['💡', timeRange ? `智能提醒 ${timeRange}` : '智能提醒']
       case PushDataTypes.DAILY_SUMMARY_GENERATED:
         return ['👋', 'Daily Summary']
       case PushDataTypes.WEEKLY_SUMMARY_GENERATED:
@@ -139,6 +149,7 @@ const ProactiveFeedCard: React.FC = ({}) => {
       id: event.id,
       feedType: event.type,
       time: dayjs(event.timestamp).format('YYYY-MM-DD HH:mm:ss'),
+      timeRange: event.type === PushDataTypes.TIP_GENERATED ? formatTipTimeRange(event) : '',
       desc:
         event.type === PushDataTypes.TIP_GENERATED
           ? compactFeedDescription(event.data.content as string)
