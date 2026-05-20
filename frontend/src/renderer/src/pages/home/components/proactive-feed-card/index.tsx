@@ -50,7 +50,7 @@ const ProactiveFeedCardItem: FC<FeedCardProps> = (props) => {
   const [eventIcon, eventTitle] = useMemo(() => {
     switch (feedType) {
       case PushDataTypes.TIP_GENERATED:
-        return ['💡', 'Tip']
+        return ['💡', '智能提醒']
       case PushDataTypes.DAILY_SUMMARY_GENERATED:
         return ['👋', 'Daily Summary']
       case PushDataTypes.WEEKLY_SUMMARY_GENERATED:
@@ -125,7 +125,10 @@ const ProactiveFeedCard: React.FC = ({}) => {
       id: event.id,
       feedType: event.type,
       time: dayjs(event.timestamp).format('YYYY-MM-DD HH:mm:ss'),
-      desc: event.data.title as string,
+      desc:
+        event.type === PushDataTypes.TIP_GENERATED
+          ? (event.data.content as string)
+          : (event.data.title as string),
       doc_id: event.data.doc_id as string,
       doc_title: event.data.title as string,
       doc_content: event.data.content as string

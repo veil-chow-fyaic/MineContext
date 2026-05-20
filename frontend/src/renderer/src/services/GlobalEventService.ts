@@ -113,7 +113,7 @@ class GlobalEventService {
   // Get event title
   private getEventTitle(event: any): string {
     const titleMap: Record<string, string> = {
-      tip: '提示信息',
+      tip: '智能提醒',
       todo: '待办事项',
       activity: '活动通知',
       daily_summary: '每日总结',
