@@ -25,6 +25,18 @@ interface FeedCardProps {
   doc_content?: string // Optional: document content, for display
 }
 
+const FEED_DESC_PREVIEW_LENGTH = 90
+
+function compactFeedDescription(value?: string): string {
+  const text = removeMarkdown(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (text.length <= FEED_DESC_PREVIEW_LENGTH) {
+    return text
+  }
+  return `${text.slice(0, FEED_DESC_PREVIEW_LENGTH)}…`
+}
+
 const ProactiveFeedCardItem: FC<FeedCardProps> = (props) => {
   const { id, feedType, time, desc, doc_content, doc_id } = props
   // const isDocument =
@@ -83,8 +95,10 @@ const ProactiveFeedCardItem: FC<FeedCardProps> = (props) => {
               <IconClose />
             </div>
           </div>
-          <div className="text-[var(--text-color-text-1,#0B0B0F)] w-full font-[Roboto] text-[13px] font-normal leading-[18px]">
-            {removeMarkdown(desc || '')}
+          <div
+            className="text-[var(--text-color-text-1,#0B0B0F)] w-full font-[Roboto] text-[13px] font-normal leading-[18px]"
+            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {desc || ''}
           </div>
           <div className="flex items-center gap-3">
             {/* {isDocument && (
@@ -127,7 +141,7 @@ const ProactiveFeedCard: React.FC = ({}) => {
       time: dayjs(event.timestamp).format('YYYY-MM-DD HH:mm:ss'),
       desc:
         event.type === PushDataTypes.TIP_GENERATED
-          ? (event.data.content as string)
+          ? compactFeedDescription(event.data.content as string)
           : (event.data.title as string),
       doc_id: event.data.doc_id as string,
       doc_title: event.data.title as string,
