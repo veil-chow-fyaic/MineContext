@@ -406,18 +406,13 @@ const ScreenMonitor: React.FC = () => {
 
   // Periodically check recording status
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null
-    if (isMonitoring && enableRecordingHours) {
-      interval = setInterval(() => {
-        checkCanRecord()
-      }, 60000) // Check every minute
-    }
+    const interval = setInterval(() => {
+      checkCanRecord()
+    }, 10000)
     return () => {
-      if (interval) {
-        clearInterval(interval)
-      }
+      clearInterval(interval)
     }
-  }, [isMonitoring, enableRecordingHours, checkCanRecord])
+  }, [checkCanRecord])
 
   // Sync recording status to tray
   useEffect(() => {

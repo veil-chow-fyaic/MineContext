@@ -276,7 +276,9 @@ app.whenReady().then(() => {
   // Start screenshot cleanup scheduled task
   startScreenshotCleanup()
   task.init()
-  server = startAutomationControlServer(task)
+  server = startAutomationControlServer(task, 1734, (isRecording) => {
+    trayService?.updateRecordingStatus(isRecording)
+  })
   latestActivityTask.init()
 
   app.on('activate', function () {

@@ -7,7 +7,11 @@ import { getLogger } from '@shared/logger/main'
 
 const logger = getLogger('AutomationControlService')
 
-export function startAutomationControlServer(task: ScreenMonitorTask, port = 1734): Server {
+export function startAutomationControlServer(
+  task: ScreenMonitorTask,
+  port = 1734,
+  onRecordingStatusChange?: (isRecording: boolean) => void
+): Server {
   const app = express()
 
   app.use(express.json())
@@ -81,6 +85,7 @@ export function startAutomationControlServer(task: ScreenMonitorTask, port = 173
     try {
       const config = (req.body?.config || {}) as Partial<ScreenSettings>
       const data = await task.startRecordingWithDefaults(config)
+      onRecordingStatusChange?.(data.status.status === 'running')
 
       res.json({
         success: true,
@@ -98,6 +103,7 @@ export function startAutomationControlServer(task: ScreenMonitorTask, port = 173
 
   app.post('/recording/stop', (_, res) => {
     task.stopRecording()
+    onRecordingStatusChange?.(false)
     res.json({
       success: true,
       data: task.getRecordingStatus()
