@@ -37,6 +37,8 @@ def inspect_runtime(minecontext_dir: Path) -> dict:
         "has_env": env_file.exists(),
         "has_uv": shutil.which("uv") is not None,
         "has_pnpm": shutil.which("pnpm") is not None,
+        "has_npm": shutil.which("npm") is not None,
+        "has_local_electron_vite": (frontend / "node_modules" / ".bin" / "electron-vite").exists(),
         "packaged_app": str(app_path),
         "has_packaged_app": app_path.exists(),
         "env_file": str(env_file),
@@ -51,7 +53,7 @@ def can_start_dev_runtime(checks: dict) -> bool:
             checks["has_opencontext"],
             checks["has_frontend"],
             checks["has_uv"],
-            checks["has_pnpm"],
+            checks["has_pnpm"] or checks["has_npm"] or checks["has_local_electron_vite"],
         ]
     )
 
@@ -118,8 +120,24 @@ def start_frontend(minecontext_dir: Path, no_ui: bool = True, user_data_dir: Pat
         env["MINECONTEXT_NO_UI"] = "1"
     if user_data_dir:
         env["MINECONTEXT_USER_DATA_DIR"] = str(user_data_dir)
-    spawn(["pnpm", "dev"], minecontext_dir / "frontend", log_path, env)
+    spawn(resolve_frontend_dev_command(minecontext_dir), minecontext_dir / "frontend", log_path, env)
     return log_path
+
+
+def resolve_frontend_dev_command(minecontext_dir: Path) -> list[str]:
+    local_electron_vite = minecontext_dir / "frontend" / "node_modules" / ".bin" / "electron-vite"
+    if local_electron_vite.exists():
+        return [str(local_electron_vite), "dev"]
+
+    pnpm = shutil.which("pnpm")
+    if pnpm:
+        return [pnpm, "dev"]
+
+    npm = shutil.which("npm")
+    if npm:
+        return [npm, "run", "dev"]
+
+    return ["pnpm", "dev"]
 
 
 def stop_stale_dev_frontend(minecontext_dir: Path) -> list[int]:
