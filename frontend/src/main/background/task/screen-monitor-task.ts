@@ -25,6 +25,8 @@ dayjs.extend(isSameOrBefore)
 const queue = new PQueue({ concurrency: 3 })
 
 const logger = getLogger('ScreenMonitorTask')
+const VISIBLE_SOURCE_RETRY_COUNT = 3
+const VISIBLE_SOURCE_RETRY_DELAY_MS = 1000
 
 class ScreenMonitorTask extends ScheduleNextTask {
   static globalStatus: 'running' | 'stopped' = 'stopped'
@@ -108,7 +110,7 @@ class ScreenMonitorTask extends ScheduleNextTask {
   public async startRecordingWithDefaults(config: Partial<ScreenSettings> = {}) {
     this.updateModelConfig({ ...defaultScreenSettings, ...config })
 
-    const visibleSources = await this.getVisibleSourcesUseCache()
+    const visibleSources = await this.getVisibleSourcesWithRetry()
     const visible = visibleSources.filter((source) => source.isVisible)
     const screens = visible.filter((source) => source.type === 'screen')
     const selectedSources = screens.length > 0 ? [screens[0]] : visible.slice(0, 1)
@@ -183,6 +185,25 @@ class ScreenMonitorTask extends ScheduleNextTask {
       return []
     }
   }
+
+  private async getVisibleSourcesWithRetry() {
+    let visibleSources: CaptureSource[] = []
+
+    for (let attempt = 1; attempt <= VISIBLE_SOURCE_RETRY_COUNT; attempt += 1) {
+      visibleSources = await this.getVisibleSourcesUseCache()
+      if (visibleSources.some((source) => source.isVisible)) {
+        return visibleSources
+      }
+
+      if (attempt < VISIBLE_SOURCE_RETRY_COUNT) {
+        logger.warn(`visible sources empty on recording start, retrying ${attempt}/${VISIBLE_SOURCE_RETRY_COUNT}`)
+        await new Promise((resolve) => setTimeout(resolve, VISIBLE_SOURCE_RETRY_DELAY_MS))
+      }
+    }
+
+    return visibleSources
+  }
+
   private async handleScreenshotTask(source: CaptureSource, createTime: Dayjs) {
     const res = await screenshotService.takeScreenshot(source.id, createTime)
 

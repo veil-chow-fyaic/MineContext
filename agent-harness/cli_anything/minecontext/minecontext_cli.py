@@ -242,7 +242,19 @@ def service_up(record: bool, no_ui: bool, minecontext_dir: str | None, user_data
             raise SystemExit(1)
         return
 
-    recording = client.recording_start({}) if record else None
+    recording = (
+        start_recording_with_recovery(
+            client=client,
+            root=root,
+            checks=checks,
+            actions=actions,
+            no_ui=no_ui,
+            user_data_dir=resolved_user_data_dir,
+            wait=wait,
+        )
+        if record
+        else None
+    )
     output(
         {
             "ok": True,
@@ -254,6 +266,44 @@ def service_up(record: bool, no_ui: bool, minecontext_dir: str | None, user_data
             "recording": recording,
         }
     )
+
+
+def start_recording_with_recovery(
+    client: MineContextClient,
+    root: Path,
+    checks: dict[str, Any],
+    actions: list[dict[str, Any]],
+    no_ui: bool,
+    user_data_dir: Path | None,
+    wait: float,
+) -> Any:
+    try:
+        return client.recording_start({})
+    except MineContextError as exc:
+        if not is_no_visible_source_error(str(exc)) or not can_start_dev_runtime(checks):
+            raise
+
+        stopped = stop_stale_dev_frontend(root)
+        if stopped:
+            actions.append({"service": "frontend", "action": "stop-stale-after-source-loss", "pids": stopped})
+        actions.append(
+            {
+                "service": "frontend",
+                "action": "restart-after-source-loss",
+                "no_ui": no_ui,
+                "user_data_dir": str(user_data_dir) if user_data_dir else None,
+                "log": str(start_frontend(root, no_ui=no_ui, user_data_dir=user_data_dir)),
+            }
+        )
+
+        if not wait_until(lambda: probe(lambda: client.control("GET", "/health"))["ok"], wait):
+            raise MineContextError("control API did not recover after restarting Electron frontend")
+
+        return client.recording_start({})
+
+
+def is_no_visible_source_error(message: str) -> bool:
+    return "No visible screen or window source is available for recording" in message
 
 
 @main.group()

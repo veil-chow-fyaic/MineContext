@@ -1,6 +1,7 @@
 from click.testing import CliRunner
 
 from cli_anything.minecontext import minecontext_cli
+from cli_anything.minecontext.core.client import MineContextError
 from cli_anything.minecontext.minecontext_cli import main
 
 
@@ -388,6 +389,47 @@ def test_service_up_record_when_services_ready():
 
     assert result.exit_code == 0
     assert ("recording_start", {}) in fake.calls
+
+
+def test_service_up_recovers_recording_after_visible_source_loss(tmp_path, monkeypatch):
+    class RecoveringClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.recording_start_count = 0
+
+        def recording_start(self, config=None):
+            self.recording_start_count += 1
+            self.calls.append(("recording_start", config))
+            if self.recording_start_count == 1:
+                raise MineContextError(
+                    "POST http://127.0.0.1:1734/recording/start failed: "
+                    "No visible screen or window source is available for recording"
+                )
+            return {"success": True, "config": config}
+
+    fake = RecoveringClient()
+    started = {}
+
+    monkeypatch.setattr(minecontext_cli, "resolve_minecontext_dir", lambda value=None: tmp_path)
+    monkeypatch.setattr(minecontext_cli, "inspect_runtime", lambda root: {"has_packaged_app": False})
+    monkeypatch.setattr(minecontext_cli, "can_start_dev_runtime", lambda checks: True)
+    monkeypatch.setattr(minecontext_cli, "stop_stale_dev_frontend", lambda root: [24794])
+    monkeypatch.setattr(minecontext_cli, "wait_until", lambda check, timeout: check())
+
+    def fake_start_frontend(root, no_ui=True, user_data_dir=None):
+        started["root"] = root
+        started["no_ui"] = no_ui
+        started["user_data_dir"] = user_data_dir
+        return tmp_path / "frontend.log"
+
+    monkeypatch.setattr(minecontext_cli, "start_frontend", fake_start_frontend)
+
+    result = invoke_with_fake(["--json", "service", "up", "--record", "--wait", "0.1"], fake)
+
+    assert result.exit_code == 0
+    assert fake.recording_start_count == 2
+    assert '"restart-after-source-loss"' in result.output
+    assert started["root"] == tmp_path
 
 
 def test_window_hide_semantic_command():
